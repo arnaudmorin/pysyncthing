@@ -11,7 +11,10 @@ pysyncthing resources
 """
 import json
 
-from restkit import Resource
+#from restkit import Resource
+import requests
+from requests.exceptions import RequestException
+
 
 from pysyncthing.exceptions import PySyncthingError
 
@@ -74,13 +77,12 @@ def tidy_params(params):
 
 
 # pylint: disable=too-many-public-methods
-class SyncthingClient(Resource):
+class SyncthingClient():
     """SyncthingClient class"""
 
-    def __init__(self, api_key, api_url='https://127.0.0.1:8384', **kwargs):
+    def __init__(self, api_key, api_url='http://127.0.0.1:8384'):
         """Init"""
-        super(SyncthingClient, self).__init__(api_url, ssl_version=3,
-                                              **kwargs)
+        self.api_url = api_url
         self.api_key = api_key
         self.response = None
 
@@ -90,37 +92,51 @@ class SyncthingClient(Resource):
                 'User-Agent': 'pysyncthing',
                 'Content-Type': 'application/json'}
 
-    def _request(self, *args, **kwargs):
+    def _request(self, method, path, params=None, data=None):
         """Make the request"""
         try:
-            self.response = self.request(
-                *args, headers=self._request_headers(), **kwargs)
-        except BaseException, err:
+            if method == 'GET':
+                self.response = requests.get(
+                    url="{}/{}".format(self.api_url, path),
+                    headers=self._request_headers(),
+                    params=params)
+            elif method == 'POST':
+                self.response = requests.post(
+                    url="{}/{}".format(self.api_url, path),
+                    headers=self._request_headers(),
+                    params=params,
+                    data=data)
+        except RequestException as err:
             code = 520
-            if hasattr(err, 'status_int'):
-                code = err.status_int
+            message = err
+            if hasattr(err, 'status_code'):
+                code = err.status_code
             if hasattr(err, 'message'):
                 message = err.message
             raise PySyncthingError(code, message)
-        if self.response.status_int == 200:
-            body = self.response.body_string()
+        if self.response.status_code == 200:
+            body = self.response.text
             if not len(body):
                 body = '{"code":%d,"message":"Completed successfully"}' % \
-                    self.response.status_int
+                    self.response.status_code
         else:
-            raise PySyncthingError(code=self.response.status_int,
-                                   message=self.response.body_string())
+            raise PySyncthingError(code=self.response.status_code,
+                                   message=self.response.text)
         return json.loads(body)
 
     def api_call(self, opts, body=None, **kwargs):
         """Setup the request"""
         if body:
             body = json.dumps(body)
+        else:
+            body = None
         if 'params_dict' in kwargs:
             params = tidy_params(kwargs.get('params_dict'))
             kwargs['params_dict'] = params
+        else:
+            params = None
         return self._request(
-            opts['method'], path=opts['name'], payload=body, **kwargs)
+            method=opts['method'], path=opts['name'], params=params, data=body)
 
     # System
     def get_version(self):
